@@ -1,0 +1,2 @@
+{"screenshot": "frames/example_toolbar.png", "instruction": "click the save icon in the toolbar", "bbox": [412, 64, 444, 96], "element_id": "toolbar_save", "screen_w": 1920, "screen_h": 1080}
+{"screenshot": "frames/example_dialog.png", "instruction": "click the cancel button", "bbox": [1180, 742, 1300, 786], "element_id": "dialog_cancel", "screen_w": 1920, "screen_h": 1080}

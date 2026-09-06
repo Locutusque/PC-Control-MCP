@@ -1,0 +1,3 @@
+{"task_id": "settings_dark_mode", "instruction": "open settings and turn on dark mode", "success_criteria": "the application is displaying a dark theme", "timeout_s": 60}
+{"task_id": "checkout_form", "instruction": "fill in the checkout form and submit it", "form_data": {"email": "j.doe@example.com", "name": "Jane Doe"}, "success_criteria": "an order confirmation is visible", "timeout_s": 120}
+{"task_id": "search_docs", "instruction": "search the documentation for the refund policy", "success_criteria": "search results mentioning the refund policy are visible", "timeout_s": 45}

@@ -1,0 +1,4 @@
+{"task_id": "settings_dark_mode", "instruction": "open settings and turn on dark mode", "form_data": {}, "success_criteria": "the application is displaying a dark theme and the settings panel is closed", "timeout_s": 60, "should_escalate": false}
+{"task_id": "checkout_form", "instruction": "fill in the checkout form and submit it", "form_data": {"email": "j.doe@example.com", "name": "Jane Doe"}, "success_criteria": "an order confirmation is visible", "timeout_s": 120, "should_escalate": false}
+{"task_id": "missing_button", "instruction": "click the export to PDF button", "form_data": {}, "success_criteria": "a PDF export dialog is open", "timeout_s": 45, "should_escalate": true}
+{"task_id": "login_required", "instruction": "open the billing history page", "form_data": {}, "success_criteria": "the billing history table is visible", "timeout_s": 45, "should_escalate": true}

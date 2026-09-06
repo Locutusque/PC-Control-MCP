@@ -1,0 +1,2 @@
+{"screenshot": "frames/example_checkout.png", "instruction": "fill in the email field", "form_data": {"email": "j.doe@example.com", "name": "Jane Doe"}, "expected_value": "j.doe@example.com"}
+{"screenshot": "frames/example_signup.png", "instruction": "enter the full name", "form_data": {"email": "j.doe@example.com", "name": "Jane Doe"}, "expected_value": "Jane Doe"}
