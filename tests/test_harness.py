@@ -312,3 +312,46 @@ class TestMcpTool:
         assert payload["status"] == "done"
         # ...but it is on disk for stage 3.
         assert (tmp_path / f"{payload['rollout_id']}.json").exists()
+
+
+class TestUndecodableAction:
+    """An untrained or drifting policy can fail to produce a valid action.
+
+    Free-compose sampling can run past the type budget without emitting
+    <TYPE_END>. The loop must hand back rather than retry forever, and must
+    never dispatch anything for the failed tick.
+    """
+
+    class _FailingPolicy:
+        def make_session(self, *args, **kwargs):
+            return None
+
+        def act(self, frame, instruction, form_data, history, session=None):
+            @dataclass
+            class _Truncated:
+                action = None
+                atoms = ["<TYPE_START>", "and on and on"]
+                error = "hit the 96-token budget in state in_free_text"
+
+                @property
+                def ok(self):
+                    return False
+
+            return _Truncated()
+
+    def test_loop_escalates_and_dispatches_nothing(self, codec, safety_config):
+        backend = NullBackend(SCREEN)
+        dispatcher = Dispatcher(
+            backend, ActionGuard(safety_config, codec, SCREEN), codec, safety_config
+        )
+        frame = np.random.RandomState(0).randint(0, 255, (60, 80, 3), dtype=np.uint8)
+        loop = ControlLoop(
+            self._FailingPolicy(), dispatcher, lambda: frame,
+            HarnessConfig(target_hz=0), foreground=lambda: "chrome",
+        )
+        result = loop.run("do the thing")
+        assert result.status is SubtaskStatus.ESCALATED
+        assert "no valid action" in result.stop_reason
+        assert backend.calls == []
+        # The reason survives into the trace for stage 3 to learn from.
+        assert result.trace.ticks[-1].blocked_reason

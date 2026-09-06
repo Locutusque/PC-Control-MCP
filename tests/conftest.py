@@ -135,6 +135,9 @@ def tiny_policy(policy_config, action_tokenizer):
 
     from gui_agent.model.policy import GuiPolicy
 
+    # Seeded: an untrained policy emits essentially random actions, and an
+    # unseeded one makes any assertion about its behaviour intermittent.
+    torch.manual_seed(0)
     lm = LlamaForCausalLM(
         LlamaConfig(
             vocab_size=len(action_tokenizer), hidden_size=64, intermediate_size=128,
