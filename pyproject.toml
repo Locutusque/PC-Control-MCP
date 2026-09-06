@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gui-agent"
+version = "0.1.0"
+description = "Real-time GUI control agent: a small ViT + LM policy driving the screen in a closed loop, called by an LLM orchestrator over MCP."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# The core action space, schema, harness control flow and dataset builders run
+# on the standard library alone, so they stay testable without a GPU stack.
+dependencies = []
+
+[project.optional-dependencies]
+# Stage 0: the background recording daemon.
+capture = [
+  "mss>=9.0",
+  "pynput>=1.7",
+  "pillow>=10.0",
+  "cryptography>=42.0",   # encrypt_at_rest; the daemon refuses to run without it
+  "pystray>=0.19",        # visible recording indicator
+]
+# Optional per-OS extras for window/accessibility metadata.
+capture-linux = ["python-xlib>=0.33"]
+capture-macos = ["pyobjc-framework-Cocoa>=10.0", "pyobjc-framework-Quartz>=10.0"]
+capture-windows = ["psutil>=5.9", "comtypes>=1.2"]
+# OCR redaction sweep.
+redaction = ["pytesseract>=0.3.10", "pillow>=10.0"]
+
+model = [
+  "torch>=2.2",
+  "transformers>=4.44",
+  "peft>=0.11",
+  "numpy>=1.24",
+  "pillow>=10.0",
+]
+train = [
+  "gui-agent[model]",
+  "accelerate>=0.30",
+  "bitsandbytes>=0.43; platform_system=='Linux'",
+  "tensorboard>=2.16",
+]
+harness = ["pyautogui>=0.9.54", "numpy>=1.24", "pillow>=10.0"]
+mcp = ["mcp>=1.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5"]
+all = ["gui-agent[capture,model,train,harness,mcp,redaction,dev]"]
+
+[project.scripts]
+gui-agent-capture = "gui_agent.capture.cli:main"
+gui-agent-data = "gui_agent.data.cli:main"
+gui-agent-train = "gui_agent.train.cli:main"
+gui-agent-mcp = "gui_agent.harness.server:main"
+
+[tool.setuptools.packages.find]
+include = ["gui_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+  "slow: needs the full model stack (torch + transformers)",
+  "platform: needs a real desktop session",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "B008"]

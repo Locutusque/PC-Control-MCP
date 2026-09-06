@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Captured data and model artifacts are never committed.
+# The capture pool contains raw screen recordings of real usage; see
+# docs/privacy.md before changing anything here.
+data_pool/
+raw_capture/
+runs/
+checkpoints/
+*.ckpt
+*.safetensors
+*.mp4
+*.mkv
+*.png
+!docs/**/*.png
