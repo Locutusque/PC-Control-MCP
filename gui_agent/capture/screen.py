@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 __all__ = ["ScreenGrabber", "SegmentWriter", "VideoUnavailable", "read_segment_frames"]
 
 
+_BYTES_PER_PIXEL = {"bgra": 4, "rgba": 4, "rgb24": 3, "bgr24": 3}
+
+
 class VideoUnavailable(RuntimeError):
     """ffmpeg or a capture backend is missing."""
 
@@ -50,6 +53,7 @@ class ScreenGrabber:
         self.scale = scale
         self._sct = None
         self._monitor = None
+        self._frame_size: tuple[int, int] | None = None
 
     def open(self) -> ScreenGrabber:
         try:
@@ -72,6 +76,7 @@ class ScreenGrabber:
         if self._sct is not None:
             self._sct.close()
             self._sct = None
+        self._frame_size = None
 
     def __enter__(self) -> ScreenGrabber:
         return self.open()
@@ -81,14 +86,42 @@ class ScreenGrabber:
 
     @property
     def size(self) -> tuple[int, int]:
+        """The **input coordinate space**, in points.
+
+        This is the space mouse events are reported in, so it -- not the pixel
+        buffer size -- is what click coordinates must be grounded against.  On a
+        HiDPI display (any Retina Mac, and fractional scaling on Linux) the two
+        differ, and grounding against the wrong one silently mislabels every
+        click by the scale factor.
+        """
         if self._monitor is None:
             raise VideoUnavailable("grabber is not open")
         return self._monitor["width"], self._monitor["height"]
 
     @property
+    def frame_size(self) -> tuple[int, int]:
+        """The **pixel buffer** size, probed from a real grab.
+
+        mss reports monitor geometry in points but returns a backing buffer at
+        the display's true pixel density, so on a 2x Retina panel a frame
+        carries four times the bytes the monitor dict implies.  ffmpeg is fed
+        raw bytes with no header to correct it, so this must come from an
+        actual frame rather than from the monitor geometry.
+        """
+        if self._frame_size is None:
+            shot = self.grab()
+            self._frame_size = (shot.width, shot.height)
+        return self._frame_size
+
+    @property
+    def pixel_ratio(self) -> float:
+        """Pixels per point. 2.0 on a Retina display, 1.0 on a plain one."""
+        return self.frame_size[0] / max(1, self.size[0])
+
+    @property
     def output_size(self) -> tuple[int, int]:
-        w, h = self.size
-        # ffmpeg's yuv420p path needs even dimensions.
+        """Encoded size after ``scale``, with even dimensions for ffmpeg."""
+        w, h = self.frame_size
         return max(2, int(w * self.scale) // 2 * 2), max(2, int(h * self.scale) // 2 * 2)
 
     def grab(self) -> Frame:
@@ -129,12 +162,23 @@ class SegmentWriter:
         codec: str = "ffv1",
         crf: int = 18,
         pix_fmt_in: str = "bgra",
+        output_width: int | None = None,
+        output_height: int | None = None,
     ) -> None:
         self.path = Path(path)
+        # width/height describe the raw bytes arriving on stdin and must match
+        # the frames exactly; output_width/height are what gets encoded, so
+        # downscaling happens in ffmpeg rather than in the capture hot path.
         self.width, self.height, self.fps = width, height, fps
+        self.output_width = output_width or width
+        self.output_height = output_height or height
         self.codec, self.crf, self.pix_fmt_in = codec, crf, pix_fmt_in
         self._proc: subprocess.Popen | None = None
         self.n_frames = 0
+
+    @property
+    def is_scaling(self) -> bool:
+        return (self.output_width, self.output_height) != (self.width, self.height)
 
     @staticmethod
     def ffmpeg_path() -> str:
@@ -152,6 +196,8 @@ class SegmentWriter:
             "-f", "rawvideo", "-pix_fmt", self.pix_fmt_in,
             "-s", f"{self.width}x{self.height}", "-r", str(self.fps), "-i", "-",
         ]
+        if self.is_scaling:
+            cmd += ["-vf", f"scale={self.output_width}:{self.output_height}:flags=area"]
         if self.codec == "ffv1":
             cmd += ["-c:v", "ffv1", "-level", "3", "-g", "1", "-pix_fmt", "bgr0"]
         else:
@@ -165,6 +211,17 @@ class SegmentWriter:
         """Append a frame; returns its index within the segment."""
         if self._proc is None or self._proc.stdin is None:
             raise VideoUnavailable("segment writer is not open")
+        expected = self.width * self.height * _BYTES_PER_PIXEL[self.pix_fmt_in]
+        if len(frame.data) != expected:
+            # ffmpeg reads a headerless byte stream, so a size mismatch does not
+            # error -- it silently desynchronises and every later frame is
+            # garbage. Catch it on the first frame instead.
+            raise VideoUnavailable(
+                f"frame is {len(frame.data)} bytes ({frame.width}x{frame.height}) but the "
+                f"encoder was opened for {self.width}x{self.height} ({expected} bytes). "
+                "On a HiDPI display the pixel buffer is larger than the monitor "
+                "geometry; open the writer with ScreenGrabber.frame_size."
+            )
         try:
             self._proc.stdin.write(frame.data)
         except BrokenPipeError as exc:

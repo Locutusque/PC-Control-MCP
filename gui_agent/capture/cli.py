@@ -52,22 +52,122 @@ def cmd_keygen(args) -> int:
 
 
 def cmd_doctor(args) -> int:
-    """Report whether this machine can record with the guarantees configured."""
+    """Report whether this machine can record with the guarantees configured.
+
+    Deliberately verbose: most of what can go wrong here is a permission that
+    was never granted, and the symptom is a dataset that looks fine but is
+    empty or mislabelled rather than an error.
+    """
     config = _load_config(args.config)
     backend = get_backend()
     caps = backend.capabilities()
+
     print(f"platform backend : {backend.name}")
     for name, ok in caps.items():
         print(f"  {name:<24} {'yes' if ok else 'NO'}")
+
+    warnings: list[str] = []
+    print("\nscreen capture")
+    geometry = _probe_screen(config, warnings)
+    print("\ninput hooks")
+    _probe_input(config, warnings)
+
     daemon = CaptureDaemon(config, backend=backend)
     problems = daemon.preflight()
+
+    if not caps["secure_field_detection"] and config.privacy.redact_password_fields:
+        warnings.append(
+            "secure-field detection is unavailable, so every keystroke is treated as "
+            "secure and NO typed text will be recorded. The capture is still useful for "
+            "stage 1 (movement), but stage 2 will have no field-fill or free-compose "
+            "examples at all."
+        )
+
+    if warnings:
+        print("\nwarnings:")
+        for w in warnings:
+            print(f"  - {w}")
     if problems:
         print("\nblocking problems:")
         for p in problems:
             print(f"  - {p}")
+    _print_platform_help(backend.name, caps, geometry)
+
+    if problems:
         return 1
-    print("\nready to record")
+    print("\nready to record" + (" (with the warnings above)" if warnings else ""))
     return 0
+
+
+def _probe_screen(config: CaptureConfig, warnings: list[str]) -> dict | None:
+    """Open the grabber and take one real frame."""
+    from ..capture.screen import ScreenGrabber, VideoUnavailable
+
+    try:
+        grabber = ScreenGrabber(scale=config.capture_scale).open()
+    except VideoUnavailable as exc:
+        print(f"  unavailable: {exc}")
+        return None
+    try:
+        frame = grabber.grab()
+        points, pixels = grabber.size, grabber.frame_size
+        output = grabber.output_size
+        print(f"  input coordinate space   {points[0]}x{points[1]} (points)")
+        print(f"  captured pixel buffer    {pixels[0]}x{pixels[1]}")
+        print(f"  pixel ratio              {grabber.pixel_ratio:.2g}x")
+        print(f"  encoded at               {output[0]}x{output[1]} "
+              f"(capture_scale={config.capture_scale})")
+        raw = frame.data
+        # Sampled rather than scanned: a full 4K frame comparison per byte is
+        # slow and adds nothing over a sample this large.
+        sample = raw[: min(len(raw), 400_000)]
+        if len(set(sample[::997])) <= 1:
+            warnings.append(
+                "the captured frame is a single flat colour. On macOS this usually "
+                "means Screen Recording permission has not been granted; on Wayland it "
+                "means the compositor refused the capture."
+            )
+        if grabber.pixel_ratio != 1.0:
+            print(f"  note: HiDPI display. Clicks are grounded against the "
+                  f"{points[0]}x{points[1]} point space, video is encoded from the "
+                  f"{pixels[0]}x{pixels[1]} buffer.")
+        return {"points": points, "pixels": pixels, "ratio": grabber.pixel_ratio}
+    finally:
+        grabber.close()
+
+
+def _probe_input(config: CaptureConfig, warnings: list[str]) -> None:
+    """Start the input hooks briefly to see whether the OS allows them."""
+    from ..capture.input_hooks import InputRecorder, InputUnavailable
+
+    recorder = InputRecorder(config.privacy)
+    try:
+        recorder.start()
+    except InputUnavailable as exc:
+        print(f"  unavailable: {exc}")
+        warnings.append(f"input capture will not work: {exc}")
+        return
+    finally:
+        try:
+            recorder.stop()
+        except Exception:
+            pass
+    print("  keyboard and mouse hooks started successfully")
+
+
+def _print_platform_help(backend_name: str, caps: dict, geometry: dict | None) -> None:
+    if backend_name != "darwin":
+        return
+    print(
+        "\nmacOS permissions (System Settings -> Privacy & Security):\n"
+        "  Accessibility     -> your terminal, or the Python binary. Required for the\n"
+        "                       keyboard/mouse hooks and for password-field detection.\n"
+        "  Screen Recording  -> same application. Required for frame capture; macOS\n"
+        "                       returns a desktop-only image rather than an error when\n"
+        "                       this is missing, so it can look like it is working.\n"
+        "  After granting either one, fully quit and reopen the terminal. macOS does\n"
+        "  not apply the change to an already-running process."
+    )
 
 
 def cmd_record(args) -> int:

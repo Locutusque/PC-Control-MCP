@@ -233,7 +233,12 @@ class CaptureDaemon:
         self._grabber.open()
         self._install_signal_handlers()
 
-        log.info("capture started: session=%s root=%s", self.session_id, self.root)
+        log.info(
+            "capture started: session=%s root=%s input=%dx%d pixels=%dx%d (%.2gx) "
+            "encoding=%dx%d",
+            self.session_id, self.root, *self._grabber.size, *self._grabber.frame_size,
+            self._grabber.pixel_ratio, *self._grabber.output_size,
+        )
         try:
             self._loop(max_frames)
         finally:
@@ -316,8 +321,11 @@ class CaptureDaemon:
             app_context=app,
             window_title=info.title,
             url=info.url,
-            screen_w=frame.width,
-            screen_h=frame.height,
+            # The *input* coordinate space, which is what mouse events are
+            # reported in. Recording the pixel buffer size here would mislabel
+            # every click on a HiDPI display by the scale factor, silently.
+            screen_w=self._grabber.size[0],
+            screen_h=self._grabber.size[1],
             is_password_field=secure,
         )
         # One record per event so the action stream keeps its ordering; a frame
@@ -339,14 +347,19 @@ class CaptureDaemon:
     def _open_segment(self, now: float, app: str) -> None:
         label, self._pending_label = self._pending_label, None
         seg = self.segmenter.open(now, app, label)
-        w, h = self._grabber.output_size
+        # Raw dimensions come from a real frame, not the monitor geometry: on a
+        # HiDPI display those differ and ffmpeg would desynchronise silently.
+        frame_w, frame_h = self._grabber.frame_size
+        out_w, out_h = self._grabber.output_size
         self._writer = SegmentWriter(
             self.root / "video" / f"{seg.segment_id}.mkv",
-            width=self._grabber.size[0],
-            height=self._grabber.size[1],
+            width=frame_w,
+            height=frame_h,
             fps=self.config.fps,
             codec=self.config.video_codec,
             crf=self.config.video_crf,
+            output_width=out_w,
+            output_height=out_h,
         ).open()
         self.stats.segments += 1
         log.debug("segment %s opened (app=%s)", seg.segment_id, app)
