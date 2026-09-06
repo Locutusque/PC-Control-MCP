@@ -37,6 +37,26 @@ banking and health sites by default, but it has no way to know which of
 even after everything else is set up — see `docs/privacy.md` for why that
 confirmation exists and isn't a step worth skipping.
 
+## macOS: "Apple could not verify this is free of malware"
+
+Expected the first time, and not a sign anything is wrong. macOS flags any
+script that isn't signed by a paid Apple Developer account, especially one
+downloaded from a browser -- which is exactly what happens if you used
+GitHub's "Download ZIP" button rather than `git clone`. This project doesn't
+have a code-signing certificate, so this warning can't be made to disappear;
+what follows is Apple's own supported way to run a script you trust anyway,
+once, without turning off Gatekeeper for anything else on your Mac.
+
+**Control-click** (or right-click) the file → **Open** → **Open** again in the
+dialog that appears. You only need to do this once per file, on this Mac.
+
+If you already have Terminal open, this does the same thing:
+
+```bash
+cd path/to/PC-Control-MCP
+xattr -d com.apple.quarantine "install/macOS - Setup Capture.command"
+```
+
 ## After setup
 
 Two shortcuts are created next to your home folder's `.gui-agent` directory:

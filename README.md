@@ -90,7 +90,9 @@ pip install -e '.[all]'
 
 Double-click the setup file for your OS in [`install/`](install/) instead —
 it does everything below for you, and stops to ask before it starts
-recording anything. See [`install/README.md`](install/README.md).
+recording anything. See [`install/README.md`](install/README.md) — including
+what to do about the "Apple could not verify..." warning macOS shows the
+first time, which is expected and not a sign of a problem.
 
 ### 1. Capture
 
