@@ -25,7 +25,11 @@ capture = [
 ]
 # Optional per-OS extras for window/accessibility metadata.
 capture-linux = ["python-xlib>=0.33"]
-capture-macos = ["pyobjc-framework-Cocoa>=10.0", "pyobjc-framework-Quartz>=10.0"]
+capture-macos = [
+  "pyobjc-framework-Cocoa>=10.0",              # AppKit.NSWorkspace: foreground app
+  "pyobjc-framework-Quartz>=10.0",             # idle time, window list
+  "pyobjc-framework-ApplicationServices>=10.0",# AXUIElement: secure-field detection
+]
 capture-windows = ["psutil>=5.9", "comtypes>=1.2"]
 # OCR redaction sweep.
 redaction = ["pytesseract>=0.3.10", "pillow>=10.0"]
