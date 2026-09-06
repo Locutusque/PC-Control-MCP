@@ -19,10 +19,12 @@ from ..config import CaptureConfig
 from .daemon import CaptureDaemon
 from .platform_ import get_backend
 from .privacy import (
+    ENVIRONMENTAL_QUARANTINE_REASONS,
     PrivacyError,
     RedactionScanner,
     SegmentEncryptor,
     default_ocr,
+    is_retryable_quarantine,
     promote_segments,
     prune_expired,
 )
@@ -220,12 +222,19 @@ def cmd_promote(args) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
-    total_promoted = total_quarantined = pending = 0
+    total_promoted = total_quarantined = considered = retryable_skipped = 0
     for session_dir in session_dirs:
-        segments = [s for s in _load_segments(session_dir) if s.redaction_status == "pending"]
+        all_segments = _load_segments(session_dir)
+        segments = [s for s in all_segments if s.redaction_status == "pending"]
+        if args.retry:
+            # Re-examine segments quarantined because the sweep could not run,
+            # now that whatever blocked it may be fixed.
+            segments += [s for s in all_segments if is_retryable_quarantine(s)]
+        else:
+            retryable_skipped += sum(1 for s in all_segments if is_retryable_quarantine(s))
         if not segments:
             continue
-        pending += len(segments)
+        considered += len(segments)
 
         promoted, quarantined = promote_segments(
             segments, scanner, session_dir, config.pool_root,
@@ -240,8 +249,17 @@ def cmd_promote(args) -> int:
         for seg in quarantined:
             print(f"  {session_dir.name}/{seg.segment_id}: {', '.join(seg.redaction_findings)}")
 
-    if not pending:
+    if not considered:
         print("nothing to promote")
+        if retryable_skipped:
+            # The failure this message used to hide: a segment quarantined
+            # because OCR was missing looks identical to having no work at all.
+            print(
+                f"\n{retryable_skipped} segment(s) are quarantined because the sweep "
+                "could not run (missing OCR, or no key), not because anything was\n"
+                "found in them. Re-examine those with:\n\n"
+                "    python -m gui_agent.capture.cli promote --retry\n"
+            )
         return 0
     print(f"promoted {total_promoted}, quarantined {total_quarantined}")
     return 0
@@ -271,6 +289,7 @@ def cmd_status(args) -> int:
         return 0
     total = by_status = 0
     counts: dict[str, int] = {}
+    reasons: dict[str, int] = {}
     for session_dir in sorted(p for p in root.glob("*") if p.is_dir()):
         segments = _load_segments(session_dir)
         frames = sum(s.n_frames for s in segments)
@@ -279,9 +298,17 @@ def cmd_status(args) -> int:
         for seg in segments:
             counts[seg.redaction_status] = counts.get(seg.redaction_status, 0) + 1
             by_status += 1
+            for reason in seg.redaction_findings:
+                reasons[reason] = reasons.get(reason, 0) + 1
         print(f"{session_dir.name}: {len(segments)} segments, {frames} frames, {hours:.2f}h")
     print(f"\ntotal frames: {total}")
     print("redaction status: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    if reasons:
+        print("quarantined because: " + ", ".join(f"{k} ({v})" for k, v in sorted(reasons.items())))
+        if any(r in ENVIRONMENTAL_QUARANTINE_REASONS or r.startswith("scan_failed:")
+               for r in reasons):
+            print("  -> some of these mean the sweep could not run, not that something was "
+                  "found.\n     Retry them with: promote --retry")
     return 0
 
 
@@ -300,6 +327,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("promote", help="redaction sweep + promote into the training pool")
     p.add_argument("--session", default=None)
+    p.add_argument(
+        "--retry", action="store_true",
+        help="also re-examine segments quarantined because the sweep could not run "
+             "(missing OCR, unreadable files). Content findings are never retried.",
+    )
     p.set_defaults(func=cmd_promote)
 
     p = sub.add_parser("prune", help="delete raw segments past the retention window")

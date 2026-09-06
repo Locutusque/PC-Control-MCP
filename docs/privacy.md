@@ -87,6 +87,24 @@ tell you OCR is unavailable and quarantine everything.
 Dataset builders default to `require_promoted=True`. Overriding that is a
 one-flag mistake, which is why it defaults the safe way.
 
+**Quarantine has two meanings, and only one is permanent.** A segment held
+back because the sweep *could not run* — no OCR backend, no key, a decode that
+crashed — was never actually scanned, so once you fix the cause it is worth
+re-examining:
+
+```bash
+python -m gui_agent.capture.cli promote --retry
+```
+
+A segment held back for something the sweep *found* stays quarantined, and
+`--retry` deliberately skips it. Re-running would either find the same thing
+again or, if the patterns had since been loosened, quietly promote material
+that was previously flagged. Overriding that is a deliberate act: edit the
+segment's entry in the manifest by hand, after looking at what was found.
+
+`capture.cli status` prints the quarantine reasons, so you can tell the two
+apart without guessing.
+
 ---
 
 ## Storage

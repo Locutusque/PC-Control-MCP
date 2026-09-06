@@ -39,6 +39,8 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "PrivacyError",
+    "ENVIRONMENTAL_QUARANTINE_REASONS",
+    "is_retryable_quarantine",
     "BlocklistDecision",
     "BlocklistGuard",
     "SecureFieldTracker",
@@ -435,6 +437,38 @@ class SegmentEncryptor:
 # --------------------------------------------------------------------------
 # Promotion and retention
 # --------------------------------------------------------------------------
+
+
+# Quarantine reasons that mean "we could not check", as opposed to "we looked
+# and found something". Only these are safe to re-examine: the segment was
+# never actually scanned, so a retry after fixing the environment is a first
+# real scan rather than a second opinion on a content finding.
+ENVIRONMENTAL_QUARANTINE_REASONS = frozenset({
+    "ocr_unavailable",
+    "records_unreadable",
+    "video_unreadable",
+    "missing_records",
+})
+
+
+def is_retryable_quarantine(segment: SegmentMeta) -> bool:
+    """Whether a quarantined segment is worth re-examining.
+
+    A segment quarantined because tesseract was missing, or the key was not
+    set, is stuck forever otherwise -- `promote` only looks at pending
+    segments, so fixing the environment does nothing on its own.
+
+    A segment quarantined for a *content* finding stays quarantined. Retrying
+    it would either re-find the same thing (pointless) or, if the patterns had
+    since been loosened, quietly promote material that was previously flagged.
+    Overriding that is a deliberate act: edit the manifest by hand.
+    """
+    if segment.redaction_status != "quarantined" or not segment.redaction_findings:
+        return False
+    return all(
+        reason in ENVIRONMENTAL_QUARANTINE_REASONS or reason.startswith("scan_failed:")
+        for reason in segment.redaction_findings
+    )
 
 
 def promote_segments(

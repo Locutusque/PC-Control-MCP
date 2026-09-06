@@ -465,3 +465,81 @@ class TestSessionDiscovery:
         pending = [s for d in _session_dirs(config, None)
                    for s in _load_segments(d) if s.redaction_status == "pending"]
         assert len(pending) == 1
+
+
+class TestQuarantineRetry:
+    """A segment quarantined because the sweep *could not run* was stuck forever.
+
+    `promote` only looks at pending segments, so installing the missing OCR
+    backend afterwards changed nothing -- the segment stayed quarantined for a
+    reason that no longer applied, with no path back.
+    """
+
+    @staticmethod
+    def _quarantined(findings):
+        segment = SegmentMeta("seg", "s", 0.0, 1.0, 10, records_path="records/seg.jsonl")
+        segment.redaction_status = "quarantined"
+        segment.redaction_findings = findings
+        return segment
+
+    def test_environmental_reasons_are_retryable(self):
+        from gui_agent.capture.privacy import is_retryable_quarantine
+
+        for reason in ("ocr_unavailable", "records_unreadable", "video_unreadable",
+                       "missing_records", "scan_failed:OSError"):
+            assert is_retryable_quarantine(self._quarantined([reason])), reason
+
+    def test_content_findings_are_never_retryable(self):
+        # Retrying would either re-find the same thing, or -- if the patterns
+        # were since loosened -- quietly promote flagged material.
+        from gui_agent.capture.privacy import is_retryable_quarantine
+
+        assert not is_retryable_quarantine(self._quarantined(["ssn:11chars"]))
+        assert not is_retryable_quarantine(self._quarantined(["credit_card:16chars"]))
+
+    def test_a_mix_is_not_retryable(self):
+        from gui_agent.capture.privacy import is_retryable_quarantine
+
+        assert not is_retryable_quarantine(
+            self._quarantined(["ocr_unavailable", "ssn:11chars"])
+        )
+
+    def test_non_quarantined_segments_are_not_retryable(self):
+        from gui_agent.capture.privacy import is_retryable_quarantine
+
+        for status in ("pending", "clean", "redacted"):
+            segment = self._quarantined([])
+            segment.redaction_status = status
+            assert not is_retryable_quarantine(segment)
+
+    def test_retry_rescans_and_can_promote(self, tmp_path):
+        """The end-to-end path: quarantined for missing OCR, then OCR works."""
+        from gui_agent.capture.privacy import promote_segments
+
+        write_jsonl(tmp_path / "records" / "seg.jsonl",
+                    [FrameRecord(0.0, "s", "seg", 0,
+                                 event=InputEvent(EventType.TEXT, text="hello").to_dict())])
+        segment = self._quarantined(["ocr_unavailable"])
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+
+        promoted, quarantined = promote_segments(
+            [segment], scanner, tmp_path, tmp_path / "pool"
+        )
+        assert [s.segment_id for s in promoted] == ["seg"]
+        assert segment.redaction_status == "clean"
+
+    def test_retry_still_quarantines_if_the_content_is_bad(self, tmp_path):
+        from gui_agent.capture.privacy import promote_segments
+
+        write_jsonl(tmp_path / "records" / "seg.jsonl",
+                    [FrameRecord(0.0, "s", "seg", 0,
+                                 event=InputEvent(EventType.TEXT,
+                                                  text="ssn 123-45-6789").to_dict())])
+        segment = self._quarantined(["ocr_unavailable"])
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+
+        promoted, quarantined = promote_segments(
+            [segment], scanner, tmp_path, tmp_path / "pool"
+        )
+        assert not promoted
+        assert "ssn" in quarantined[0].redaction_findings[0]
