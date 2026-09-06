@@ -47,15 +47,34 @@ have a code-signing certificate, so this warning can't be made to disappear;
 what follows is Apple's own supported way to run a script you trust anyway,
 once, without turning off Gatekeeper for anything else on your Mac.
 
-**Control-click** (or right-click) the file → **Open** → **Open** again in the
-dialog that appears. You only need to do this once per file, on this Mac.
+**The fix depends on which dialog macOS shows you, and it changed in recent
+macOS versions.** If your dialog offers only **"Move to Trash"** and **"Done"**
+(no "Open" button anywhere, including after Control-click → Open), you're on
+the newer flow:
 
-If you already have Terminal open, this does the same thing:
+1. Click **Done** -- not "Move to Trash".
+2. Open **System Settings → Privacy & Security**.
+3. Scroll to the bottom, past Camera/Microphone/etc., to a line saying the
+   file "was blocked to protect your Mac", with an **Open Anyway** button
+   next to it.
+4. Click **Open Anyway**, and confirm with your password or Touch ID.
+5. Double-click the file again -- one more confirmation dialog appears; click
+   **Open**.
+
+On older macOS versions, **Control-click** (or right-click) the file →
+**Open** → **Open** again in the dialog gets you there in one step instead.
+
+**If neither shows an override,** this works on every version and doesn't
+depend on which dialog you got, because it removes the flag directly instead
+of going through Gatekeeper's UI. Open Terminal (Spotlight → type
+"Terminal" → Enter) and run:
 
 ```bash
 cd path/to/PC-Control-MCP
 xattr -d com.apple.quarantine "install/macOS - Setup Capture.command"
 ```
+
+Then double-click the file normally.
 
 ## After setup
 
