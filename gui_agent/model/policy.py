@@ -25,14 +25,14 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import torch
 import torch.nn as nn
 
-from ..actions import Action, ActionCodec
+from ..actions import ActionCodec
 from ..config import PolicyConfig
 from .decoding import ConstrainedActionDecoder, DecodeResult, SamplingConfig
 from .projector import build_projector
@@ -58,7 +58,7 @@ class PolicyBatch:
     labels: torch.Tensor           # (B, S) IGNORE_INDEX except target positions
     loss_weights: torch.Tensor     # (B,) per-example CE weight
 
-    def to(self, device, dtype=None) -> "PolicyBatch":
+    def to(self, device, dtype=None) -> PolicyBatch:
         pixels = self.pixels.to(device=device, dtype=dtype) if dtype else self.pixels.to(device)
         return PolicyBatch(
             pixels=pixels,
@@ -102,7 +102,7 @@ class GuiPolicy(nn.Module):
     @classmethod
     def from_pretrained_lm(
         cls, config: PolicyConfig | None = None, tokenizer: ActionTokenizer | None = None
-    ) -> "GuiPolicy":
+    ) -> GuiPolicy:
         """Build a fresh policy around a pretrained LM, with LoRA attached."""
         from transformers import AutoModelForCausalLM
 
@@ -222,7 +222,7 @@ class GuiPolicy(nn.Module):
         instruction: str,
         form_data: dict | None = None,
         history: Sequence[Sequence[str]] = (),
-        session: "PolicySession | None" = None,
+        session: PolicySession | None = None,
         sampling: SamplingConfig | None = None,
     ) -> DecodeResult:
         """One control tick: frame in, action out."""
@@ -314,7 +314,7 @@ class GuiPolicy(nn.Module):
         )
 
     @classmethod
-    def load(cls, path: str | Path, device: str = "cpu") -> "GuiPolicy":
+    def load(cls, path: str | Path, device: str = "cpu") -> GuiPolicy:
         path = Path(path)
         config = PolicyConfig.from_dict(json.loads((path / "config.json").read_text()))
         tokenizer = ActionTokenizer.from_pretrained(
@@ -361,7 +361,7 @@ class PolicySession:
         self._cache = None
 
     @torch.no_grad()
-    def warm(self, device=None) -> "PolicySession":
+    def warm(self, device=None) -> PolicySession:
         """Run the prefix through the LM once and keep its cache."""
         device = device or next(self.policy.parameters()).device
         ids = torch.tensor([self.prefix_ids], device=device)

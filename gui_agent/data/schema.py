@@ -9,10 +9,10 @@ inspect.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
 
 from ..capture.schema import read_jsonl, write_jsonl
 
@@ -68,7 +68,7 @@ class TrainingExample:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "TrainingExample":
+    def from_dict(cls, d: dict) -> TrainingExample:
         d = dict(d)
         if "kind" in d:
             d["kind"] = ExampleKind(d["kind"])

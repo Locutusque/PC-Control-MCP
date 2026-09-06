@@ -30,7 +30,7 @@ class Indicator:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
-    def start(self) -> "Indicator":
+    def start(self) -> Indicator:
         try:
             import pystray  # type: ignore
             from PIL import Image, ImageDraw  # type: ignore
@@ -93,7 +93,7 @@ class HotkeyListener:
         self.label_hotkey = label_hotkey
         self._listener = None
 
-    def start(self) -> "HotkeyListener":
+    def start(self) -> HotkeyListener:
         try:
             from pynput import keyboard  # type: ignore
         except ImportError:

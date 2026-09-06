@@ -19,7 +19,11 @@ from ..config import CaptureConfig
 from .daemon import CaptureDaemon
 from .platform_ import get_backend
 from .privacy import (
-    PrivacyError, RedactionScanner, SegmentEncryptor, default_ocr, promote_segments,
+    PrivacyError,
+    RedactionScanner,
+    SegmentEncryptor,
+    default_ocr,
+    promote_segments,
     prune_expired,
 )
 from .schema import SegmentMeta, read_jsonl, write_jsonl

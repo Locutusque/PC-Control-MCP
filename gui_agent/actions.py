@@ -29,9 +29,9 @@ keeps the action space testable on its own.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Iterator, Sequence
 
 from .config import ActionSpaceConfig
 

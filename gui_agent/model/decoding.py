@@ -28,8 +28,8 @@ structural, not something sampling has to get right.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import torch
 

@@ -30,14 +30,14 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
-from ..actions import Action, ActionCodec, ActionType
+from ..actions import ActionCodec
 from ..config import PolicyConfig, TrainConfig
-from ..data.schema import ExampleKind, TrainingExample, load_examples, save_examples
-from ..harness.loop import ControlLoop, RolloutTrace, SubtaskResult, SubtaskStatus
+from ..data.schema import ExampleKind, TrainingExample, load_examples
+from ..harness.loop import ControlLoop, SubtaskResult, SubtaskStatus
 from .common import Trainer, build_dataloader, resolve_device, set_seed
 
 log = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ class Task:
     setup: Callable[[], None] | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Task":
+    def from_dict(cls, d: dict) -> Task:
         return cls(
             task_id=d["task_id"],
             instruction=d["instruction"],
@@ -175,8 +175,8 @@ class RolloutCollector:
         directory.mkdir(parents=True, exist_ok=True)
         paths: list[str] = []
         try:
-            from PIL import Image
             import numpy as np
+            from PIL import Image
 
             for index, frame in enumerate(frames):
                 array = np.asarray(frame)

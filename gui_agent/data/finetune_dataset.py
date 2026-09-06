@@ -95,7 +95,7 @@ def build_finetune_examples(
             form_data.update(ta.form_data)
 
         built = 0
-        for ta, history in zip(actions, histories):
+        for ta, history in zip(actions, histories, strict=True):
             if opts.max_examples_per_segment and built >= opts.max_examples_per_segment:
                 break
             kind = _kind_for(ta.kind, ta.action.type)

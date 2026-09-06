@@ -13,18 +13,20 @@ training run.  The third needs a live desktop.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
-from typing import Sequence
 
 import torch
 
 from ..actions import Action, ActionCodec
 from ..capture.schema import read_jsonl
 from .metrics import (
-    ClickTarget, action_type_accuracy, click_accuracy, escalation_metrics,
-    field_fill_exactness, task_success_rate,
+    ClickTarget,
+    action_type_accuracy,
+    click_accuracy,
+    escalation_metrics,
+    field_fill_exactness,
+    task_success_rate,
 )
 
 log = logging.getLogger(__name__)
@@ -33,8 +35,8 @@ __all__ = ["evaluate_click_accuracy", "evaluate_field_fill", "evaluate_end_to_en
 
 
 def _load_frame(path: str | Path):
-    from PIL import Image
     import numpy as np
+    from PIL import Image
 
     return np.asarray(Image.open(path).convert("RGB"))
 

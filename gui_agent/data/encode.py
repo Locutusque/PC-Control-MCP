@@ -17,11 +17,11 @@ per control tick, so the events have to be collapsed into that form:
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
 
 from ..actions import Action, ActionCodec, ActionType
-from ..capture.schema import EventType, FrameRecord, InputEvent
+from ..capture.schema import EventType, FrameRecord
 from .schema import ExampleKind
 
 log = logging.getLogger(__name__)

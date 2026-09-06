@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from torch.utils.data import Dataset, Sampler
@@ -133,7 +133,7 @@ def collate_examples(items: Sequence[dict], pad_id: int) -> PolicyBatch:
     suffix_mask = torch.zeros((n, max_suffix), dtype=torch.long)
     labels = torch.full((n, max_suffix), IGNORE_INDEX, dtype=torch.long)
 
-    for row, (item, suffix) in enumerate(zip(items, suffixes)):
+    for row, (item, suffix) in enumerate(zip(items, suffixes, strict=True)):
         prefix = item["prefix_ids"]
         # Left-pad the prefix so the image always begins at column max_prefix.
         prefix_ids[row, max_prefix - len(prefix) :] = torch.tensor(prefix)

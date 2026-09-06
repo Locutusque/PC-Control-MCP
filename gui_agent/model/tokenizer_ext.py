@@ -17,6 +17,7 @@ contiguous block at the end of the vocabulary.  Three things depend on that:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from ..actions import ActionVocab, TokenClass
@@ -25,6 +26,11 @@ from ..config import ActionSpaceConfig
 log = logging.getLogger(__name__)
 
 __all__ = ["ActionTokenizer", "TokenizerMismatch"]
+
+
+# Atoms of this shape are meant to be action tokens; anything matching it that
+# is not in the vocabulary is a bug, not free-compose text.
+_ACTION_SHAPED = re.compile(r"^<[A-Z][A-Z0-9_+-]*>$")
 
 
 class TokenizerMismatch(RuntimeError):
@@ -49,18 +55,35 @@ class ActionTokenizer:
         self.vocab = ActionVocab(self.action_space)
 
         self.base_vocab_size = len(base_tokenizer)
-        added = base_tokenizer.add_special_tokens(
-            {"additional_special_tokens": list(self.vocab.tokens)}
+
+        # A tokenizer saved from a trained policy already carries the whole
+        # block, and reloading a checkpoint must go down that path rather than
+        # trying to add the tokens a second time. Adding only *some* of them,
+        # though, means the ids are no longer one contiguous appended block,
+        # which everything downstream assumes -- that stays an error.
+        existing = base_tokenizer.convert_tokens_to_ids(list(self.vocab.tokens))
+        unknown = base_tokenizer.unk_token_id
+        present = sum(
+            1 for i in existing if i is not None and (unknown is None or i != unknown)
         )
-        if added != len(self.vocab):
-            # Some tokens already existed, so ids are no longer one contiguous
-            # block appended at the end.  Everything downstream assumes they
-            # are, so this must be loud rather than subtly wrong.
-            raise TokenizerMismatch(
-                f"expected to add {len(self.vocab)} action tokens but the tokenizer "
-                f"accepted {added}; the base vocabulary already contains some of them. "
-                "Use a fresh tokenizer, or rename the action tokens."
+        self.reloaded = present == len(self.vocab)
+
+        if not self.reloaded:
+            if present:
+                raise TokenizerMismatch(
+                    f"{present} of {len(self.vocab)} action tokens are already present in "
+                    "the base vocabulary. Appending the rest would leave the block "
+                    "non-contiguous. Use a fresh tokenizer, or one saved from a "
+                    "checkpoint built with this exact action space."
+                )
+            added = base_tokenizer.add_special_tokens(
+                {"additional_special_tokens": list(self.vocab.tokens)}
             )
+            if added != len(self.vocab):
+                raise TokenizerMismatch(
+                    f"expected to add {len(self.vocab)} action tokens but the tokenizer "
+                    f"accepted {added}"
+                )
 
         ids = base_tokenizer.convert_tokens_to_ids(list(self.vocab.tokens))
         if len(set(ids)) != len(ids) or any(i is None for i in ids):
@@ -73,7 +96,7 @@ class ActionTokenizer:
 
         self.action_id_start = min(ids)
         self.action_id_end = self.action_id_start + len(ids)
-        self._atom_to_id = dict(zip(self.vocab.tokens, ids))
+        self._atom_to_id = dict(zip(self.vocab.tokens, ids, strict=True))
         self._id_to_atom = {i: t for t, i in self._atom_to_id.items()}
 
         # One contiguous span per class, in ActionVocab order.
@@ -91,7 +114,7 @@ class ActionTokenizer:
     # -- construction -----------------------------------------------------
     @classmethod
     def from_pretrained(cls, model_name: str, action_space: ActionSpaceConfig | None = None,
-                        **kwargs) -> "ActionTokenizer":
+                        **kwargs) -> ActionTokenizer:
         from transformers import AutoTokenizer
 
         base = AutoTokenizer.from_pretrained(model_name, **kwargs)
@@ -168,8 +191,17 @@ class ActionTokenizer:
             fixed = self._atom_to_id.get(atom)
             if fixed is not None:
                 ids.append(fixed)
-            else:
-                ids.extend(self.base.encode(atom, add_special_tokens=False))
+                continue
+            if _ACTION_SHAPED.match(atom):
+                # An out-of-range coordinate or a typo would otherwise be
+                # tokenized as ordinary text and become a garbage training
+                # target, with nothing to indicate anything went wrong.
+                raise KeyError(
+                    f"{atom!r} looks like an action token but is not in this action "
+                    f"space ({self.action_space.grid_rows}x{self.action_space.grid_cols} "
+                    f"grid, offset_grid={self.action_space.offset_grid})"
+                )
+            ids.extend(self.base.encode(atom, add_special_tokens=False))
         if add_eos and self.eos_token_id is not None:
             ids.append(self.eos_token_id)
         return ids

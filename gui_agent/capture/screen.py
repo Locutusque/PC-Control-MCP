@@ -13,9 +13,9 @@ import logging
 import shutil
 import subprocess
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class ScreenGrabber:
         self._sct = None
         self._monitor = None
 
-    def open(self) -> "ScreenGrabber":
+    def open(self) -> ScreenGrabber:
         try:
             import mss  # type: ignore
         except ImportError as exc:
@@ -73,7 +73,7 @@ class ScreenGrabber:
             self._sct.close()
             self._sct = None
 
-    def __enter__(self) -> "ScreenGrabber":
+    def __enter__(self) -> ScreenGrabber:
         return self.open()
 
     def __exit__(self, *exc) -> None:
@@ -145,7 +145,7 @@ class SegmentWriter:
             )
         return exe
 
-    def open(self) -> "SegmentWriter":
+    def open(self) -> SegmentWriter:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
             self.ffmpeg_path(), "-y", "-loglevel", "error",
@@ -187,7 +187,7 @@ class SegmentWriter:
             stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
             log.error("ffmpeg exited %s: %s", proc.returncode, stderr.strip())
 
-    def __enter__(self) -> "SegmentWriter":
+    def __enter__(self) -> SegmentWriter:
         return self.open()
 
     def __exit__(self, *exc) -> None:

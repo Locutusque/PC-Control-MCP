@@ -94,7 +94,6 @@ def field_fill_eval_hook(
         return None
 
     from ..data.dataset import GuiExampleDataset
-    from ..model.vit import preprocess_screenshot
 
     def hook(policy, step: int) -> dict:
         dataset = GuiExampleDataset(

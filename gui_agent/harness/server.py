@@ -13,9 +13,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from pathlib import Path
 
-from ..config import HarnessConfig, SafetyConfig
+from ..config import HarnessConfig
 from .dispatch import Dispatcher, build_backend
 from .loop import ControlLoop
 from .mcp_tool import TOOL_DESCRIPTION, TOOL_NAME, TOOL_SCHEMA, LowLevelTaskExecutor

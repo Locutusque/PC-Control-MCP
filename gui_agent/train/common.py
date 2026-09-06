@@ -24,14 +24,14 @@ import logging
 import math
 import random
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
 
 import torch
 from torch.utils.data import DataLoader
 
-from ..config import PolicyConfig, TrainConfig
+from ..config import TrainConfig
 from ..data.dataset import GuiExampleDataset, SegmentGroupedSampler, collate_examples
 from ..data.schema import ExampleKind, TrainingExample
 from ..model.policy import GuiPolicy, PolicyBatch
@@ -183,7 +183,7 @@ class Trainer:
             for batch in self.train_loader:
                 if self.state.step >= self.total_steps:
                     break
-                loss = self._train_step(batch)
+                self._train_step(batch)
                 accumulated += 1
 
                 if accumulated >= self.config.grad_accum:

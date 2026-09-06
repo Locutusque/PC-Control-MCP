@@ -17,11 +17,10 @@ A single aggregate number hides which one is the problem.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 import torch
 

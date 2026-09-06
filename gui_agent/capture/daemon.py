@@ -61,7 +61,7 @@ class ForegroundMonitor:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def start(self) -> "ForegroundMonitor":
+    def start(self) -> ForegroundMonitor:
         self._poll()  # prime, so the first frame is not rejected as stale
         self._thread = threading.Thread(target=self._run, name="foreground", daemon=True)
         self._thread.start()

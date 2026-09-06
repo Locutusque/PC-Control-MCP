@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from pathlib import Path
 
 from ..config import HarnessConfig, PolicyConfig, TrainConfig
 
@@ -79,11 +78,14 @@ def cmd_stage3(args) -> int:
 def cmd_collect(args) -> int:
     """Run the current policy on a task set and write corrected examples."""
     from ..capture.schema import read_jsonl
+    from ..data.schema import save_examples
     from ..harness.server import build_executor
     from .stage3_dagger import (
-        LLMCorrector, RolloutCollector, Task, build_dagger_examples,
+        LLMCorrector,
+        RolloutCollector,
+        Task,
+        build_dagger_examples,
     )
-    from ..data.schema import save_examples
 
     tasks = [Task.from_dict(row) for row in read_jsonl(args.tasks)]
     if not tasks:

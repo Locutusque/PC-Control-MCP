@@ -99,7 +99,7 @@ class InputRecorder:
         self._dropped = 0
 
     # -- lifecycle --------------------------------------------------------
-    def start(self) -> "InputRecorder":
+    def start(self) -> InputRecorder:
         try:
             from pynput import keyboard, mouse  # type: ignore
         except ImportError as exc:
@@ -138,7 +138,7 @@ class InputRecorder:
                 listener.stop()
         self._mouse_listener = self._key_listener = None
 
-    def __enter__(self) -> "InputRecorder":
+    def __enter__(self) -> InputRecorder:
         return self.start()
 
     def __exit__(self, *exc) -> None:

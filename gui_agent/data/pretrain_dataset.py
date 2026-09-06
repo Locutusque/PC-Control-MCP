@@ -54,7 +54,7 @@ def build_pretrain_examples(
             continue
         histories = encoder.with_history(actions, max_history)
 
-        for ta, history in zip(actions, histories):
+        for ta, history in zip(actions, histories, strict=True):
             if ta.kind is ExampleKind.TERMINAL and not include_terminal:
                 continue
             try:

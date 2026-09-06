@@ -9,10 +9,10 @@ segments.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterator
 
 from ..capture.schema import FrameRecord, SegmentMeta, read_frames, read_jsonl
 

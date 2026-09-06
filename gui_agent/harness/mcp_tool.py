@@ -174,8 +174,8 @@ class LowLevelTaskExecutor:
         return result.trace.rollout_id
 
     def _encode_screenshot(self, frame) -> dict:
-        from PIL import Image  # type: ignore
         import numpy as np
+        from PIL import Image  # type: ignore
 
         array = np.asarray(frame)
         if array.ndim == 3 and array.shape[2] == 4:

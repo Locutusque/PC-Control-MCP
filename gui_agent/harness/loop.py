@@ -27,13 +27,13 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Sequence
 
-from ..actions import Action, ActionType
+from ..actions import ActionType
 from ..config import HarnessConfig
-from .dispatch import DispatchResult, Dispatcher
+from .dispatch import Dispatcher, DispatchResult
 from .verifier import AlwaysTrueVerifier, Verification, Verifier
 
 log = logging.getLogger(__name__)

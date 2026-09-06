@@ -171,7 +171,7 @@ class ActionSpaceConfig(_ConfigMixin):
             raise ValueError("duplicate entries in delta_buckets")
 
     @classmethod
-    def for_vision(cls, vision: VisionConfig, **overrides) -> "ActionSpaceConfig":
+    def for_vision(cls, vision: VisionConfig, **overrides) -> ActionSpaceConfig:
         """Build an action space whose coordinate grid matches ``vision``."""
         return cls(grid_rows=vision.grid_side, grid_cols=vision.grid_side, **overrides)
 

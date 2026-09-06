@@ -14,10 +14,11 @@ sensitive data on the machine; see :mod:`gui_agent.capture.privacy` and
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 SCHEMA_VERSION = 1
 
@@ -62,7 +63,7 @@ class InputEvent:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "InputEvent":
+    def from_dict(cls, d: dict) -> InputEvent:
         d = dict(d)
         d["type"] = EventType(d["type"])
         known = {f.name for f in fields(cls)}
@@ -103,7 +104,7 @@ class FrameRecord:
         return {k: v for k, v in d.items() if v not in (None, {}, False) or k in _ALWAYS}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "FrameRecord":
+    def from_dict(cls, d: dict) -> FrameRecord:
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in known})
 
@@ -158,7 +159,7 @@ class SegmentMeta:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "SegmentMeta":
+    def from_dict(cls, d: dict) -> SegmentMeta:
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in known})
 

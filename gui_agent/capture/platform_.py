@@ -181,8 +181,8 @@ class MacBackend(PlatformBackend):
 
     def _load(self) -> bool:
         try:  # pragma: no cover - macOS only
-            from AppKit import NSWorkspace  # type: ignore
             import Quartz  # type: ignore
+            from AppKit import NSWorkspace  # type: ignore
 
             self._NSWorkspace = NSWorkspace
             self._Quartz = Quartz
@@ -217,7 +217,8 @@ class MacBackend(PlatformBackend):
     def _secure_field(self) -> bool | None:
         try:  # pragma: no cover - macOS only
             from ApplicationServices import (  # type: ignore
-                AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide,
+                AXUIElementCopyAttributeValue,
+                AXUIElementCreateSystemWide,
             )
 
             system = AXUIElementCreateSystemWide()
@@ -271,6 +272,7 @@ class WindowsBackend(PlatformBackend):
     def _load(self) -> bool:
         try:  # pragma: no cover - Windows only
             import ctypes
+
             import psutil  # type: ignore
 
             self._user32 = ctypes.windll.user32

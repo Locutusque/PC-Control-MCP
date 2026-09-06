@@ -26,9 +26,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
 
 from ..actions import ActionCodec
 from ..capture.schema import SegmentMeta, write_jsonl
@@ -346,7 +346,7 @@ class HindsightRelabeler:
         results = (
             self.relabel_batch(sources) if use_batch else [self.relabel(s) for s in sources]
         )
-        for source, result in zip(sources, results):
+        for source, result in zip(sources, results, strict=True):
             if result.error:
                 continue
             source.meta.hindsight_instruction = result.instruction

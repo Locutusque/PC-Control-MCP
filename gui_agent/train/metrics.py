@@ -23,8 +23,8 @@ The four that matter most:
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 from ..actions import Action, ActionCodec, ActionType
 
@@ -80,7 +80,7 @@ def click_accuracy(
     non_pointer = 0
     missing = 0
 
-    for prediction, target in zip(predictions, targets):
+    for prediction, target in zip(predictions, targets, strict=True):
         if prediction is None:
             missing += 1
             continue
@@ -136,7 +136,9 @@ def field_fill_exactness(
     """
     exact = routing_errors = wrong_field = missing = 0
 
-    for prediction, expected, data in zip(predictions, expected_values, form_data):
+    for prediction, expected, data in zip(
+        predictions, expected_values, form_data, strict=True
+    ):
         if prediction is None or prediction.type is not ActionType.TYPE:
             missing += 1
             continue
@@ -174,7 +176,7 @@ def action_type_accuracy(
     """Confusion over action types, ignoring arguments."""
     correct = 0
     confusion: Counter = Counter()
-    for prediction, target in zip(predictions, targets):
+    for prediction, target in zip(predictions, targets, strict=True):
         predicted = prediction.type.value if prediction else "<none>"
         if prediction is not None and prediction.type is target.type:
             correct += 1
@@ -198,10 +200,11 @@ def escalation_metrics(
     error directions have opposite costs and a single accuracy number hides
     the trade entirely.
     """
-    tp = sum(1 for e, s in zip(escalated, should_escalate) if e and s)
-    fp = sum(1 for e, s in zip(escalated, should_escalate) if e and not s)
-    fn = sum(1 for e, s in zip(escalated, should_escalate) if not e and s)
-    tn = sum(1 for e, s in zip(escalated, should_escalate) if not e and not s)
+    pairs = list(zip(escalated, should_escalate, strict=True))
+    tp = sum(1 for e, s in pairs if e and s)
+    fp = sum(1 for e, s in pairs if e and not s)
+    fn = sum(1 for e, s in pairs if not e and s)
+    tn = sum(1 for e, s in pairs if not e and not s)
 
     precision = tp / (tp + fp) if tp + fp else None
     recall = tp / (tp + fn) if tp + fn else None
@@ -236,7 +239,9 @@ def task_success_rate(statuses: Sequence[str], verified: Sequence[bool] | None =
     if verified is None:
         successes = counts.get("done", 0)
     else:
-        successes = sum(1 for s, v in zip(statuses, verified) if s == "done" and v)
+        successes = sum(
+            1 for s, v in zip(statuses, verified, strict=True) if s == "done" and v
+        )
     return {
         "n": n,
         "success_rate": round(successes / n, 4) if n else None,

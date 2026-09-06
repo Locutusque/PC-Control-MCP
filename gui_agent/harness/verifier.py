@@ -24,8 +24,8 @@ import base64
 import io
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class Verification:
     checked: bool = True
 
     @classmethod
-    def unchecked(cls, reason: str) -> "Verification":
+    def unchecked(cls, reason: str) -> Verification:
         return cls(met=True, reason=reason, checked=False)
 
 
