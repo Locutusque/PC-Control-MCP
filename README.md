@@ -86,6 +86,12 @@ times a second.
 pip install -e '.[all]'
 ```
 
+### 0. Not comfortable with a command line?
+
+Double-click the setup file for your OS in [`install/`](install/) instead —
+it does everything below for you, and stops to ask before it starts
+recording anything. See [`install/README.md`](install/README.md).
+
 ### 1. Capture
 
 ```bash
