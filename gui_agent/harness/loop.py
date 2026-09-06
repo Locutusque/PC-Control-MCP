@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..actions import ActionType
+from ..capture.screen import frame_hash, hamming  # noqa: F401 (re-exported)
 from ..config import HarnessConfig
 from .dispatch import Dispatcher, DispatchResult
 from .verifier import AlwaysTrueVerifier, Verification, Verifier
@@ -410,34 +411,6 @@ def _summarise(status: SubtaskStatus, reason: str, trace: RolloutTrace) -> str:
 # --------------------------------------------------------------------------
 # Frame hashing
 # --------------------------------------------------------------------------
-
-
-def frame_hash(frame, size: int = 16) -> int:
-    """Difference hash of a frame.
-
-    A perceptual hash rather than an exact one, so a blinking text caret or a
-    one-pixel antialiasing difference does not read as "the screen changed" and
-    defeat the stuck detector.
-    """
-    import numpy as np
-
-    array = np.asarray(frame)
-    if array.ndim == 3:
-        array = array[:, :, :3].mean(axis=2)
-    h, w = array.shape[:2]
-    # Nearest-neighbour downsample: cheap, and adequate for a change detector.
-    rows = np.linspace(0, h - 1, size).astype(int)
-    cols = np.linspace(0, w - 1, size + 1).astype(int)
-    small = array[np.ix_(rows, cols)]
-    bits = (small[:, 1:] > small[:, :-1]).flatten()
-    value = 0
-    for bit in bits:
-        value = (value << 1) | int(bit)
-    return value
-
-
-def hamming(a: int, b: int) -> int:
-    return bin(a ^ b).count("1")
 
 
 def _percentile(sorted_values: Sequence[float], q: float) -> float:

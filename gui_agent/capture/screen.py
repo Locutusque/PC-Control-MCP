@@ -19,7 +19,8 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-__all__ = ["ScreenGrabber", "SegmentWriter", "VideoUnavailable", "read_segment_frames"]
+__all__ = ["ScreenGrabber", "SegmentWriter", "VideoUnavailable", "read_segment_frames",
+           "probe_video_size", "frame_hash", "hamming"]
 
 
 _BYTES_PER_PIXEL = {"bgra": 4, "rgba": 4, "rgb24": 3, "bgr24": 3}
@@ -278,3 +279,51 @@ def read_segment_frames(path: str | Path, width: int, height: int,
             "width/height do not match the segment"
         )
     return np.frombuffer(out, dtype=np.uint8).reshape(-1, height, width, 3)
+
+
+def probe_video_size(path: str | Path) -> tuple[int, int] | None:
+    """The stored dimensions of a segment, via ffprobe.
+
+    The redaction sweep needs to decode at native resolution: forcing an
+    arbitrary width distorts the aspect ratio and downscaling loses exactly
+    the small text OCR is there to catch.
+    """
+    exe = shutil.which("ffprobe")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        width, height = (int(v) for v in out.split("x")[:2])
+        return width, height
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def frame_hash(frame, size: int = 16) -> int:
+    """Difference hash of a frame.
+
+    Perceptual rather than exact, so a blinking text caret or one pixel of
+    antialiasing does not read as "the screen changed".
+    """
+    import numpy as np
+
+    array = np.asarray(frame)
+    if array.ndim == 3:
+        array = array[:, :, :3].mean(axis=2)
+    h, w = array.shape[:2]
+    rows = np.linspace(0, h - 1, size).astype(int)
+    cols = np.linspace(0, w - 1, size + 1).astype(int)
+    small = array[np.ix_(rows, cols)]
+    bits = (small[:, 1:] > small[:, :-1]).flatten()
+    value = 0
+    for bit in bits:
+        value = (value << 1) | int(bit)
+    return value
+
+
+def hamming(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")

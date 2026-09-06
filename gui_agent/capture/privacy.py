@@ -25,8 +25,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import tempfile
 import time
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -235,6 +237,61 @@ class RedactionScanner:
                 findings.append(Finding(f.kind, f.text, frame_index, bbox))
         return findings
 
+    def scan_video(
+        self,
+        video_path: str | Path,
+        max_frames: int = 200,
+        change_threshold: int = 6,
+    ) -> list[Finding]:
+        """OCR the recorded frames and scan what is visible on screen.
+
+        Nothing else in the pipeline reads the video, so without this the
+        sweep only ever saw text the user *typed* -- a card number rendered in
+        a web page went straight into the training pool.
+
+        Frames are deduplicated by perceptual hash before OCR rather than
+        sampled every Nth. At 15Hz consecutive frames are near-identical, so
+        deduplication cuts a 300-frame segment to a few dozen distinct screens
+        while still examining every screen that actually appeared; blind
+        sampling would skip whole screens that happened to fall between
+        samples.
+
+        This is still not a proof: ``max_frames`` caps the work, and OCR
+        misses text it cannot read. It is a filter, not a guarantee.
+        """
+        if self.ocr is None:
+            return []
+        from .screen import frame_hash, hamming, probe_video_size, read_segment_frames
+
+        size = probe_video_size(video_path)
+        if size is None:
+            log.warning("could not determine the size of %s; skipping frame OCR", video_path)
+            return []
+        try:
+            frames = read_segment_frames(video_path, size[0], size[1])
+        except Exception as exc:
+            log.warning("could not decode %s for the redaction sweep: %s", video_path, exc)
+            raise
+
+        findings: list[Finding] = []
+        last_hash: int | None = None
+        scanned = 0
+        for index, frame in enumerate(frames):
+            digest = frame_hash(frame)
+            if last_hash is not None and hamming(digest, last_hash) <= change_threshold:
+                continue
+            last_hash = digest
+            findings.extend(self.scan_frame(frame, index))
+            scanned += 1
+            if scanned >= max_frames:
+                log.warning(
+                    "stopped the frame sweep of %s at %d distinct frames (max_frames); "
+                    "later frames were not examined", video_path, scanned,
+                )
+                break
+        log.info("OCR swept %d distinct frames of %s", scanned, video_path)
+        return findings
+
     def scan_records(self, records_path: str | Path) -> list[Finding]:
         """Scan the typed text recorded alongside a segment."""
         findings: list[Finding] = []
@@ -249,7 +306,15 @@ class RedactionScanner:
 
 
 def default_ocr():
-    """Tesseract-backed OCR, or ``None`` when it is unavailable."""
+    """Tesseract-backed OCR, or ``None`` when it is unavailable.
+
+    Checks that the tesseract *binary* actually runs, not merely that the
+    Python wrapper imports. ``pip install pytesseract`` does not install
+    tesseract itself, and reporting OCR as available when every call would
+    raise is the worst of the three outcomes: the sweep's gate passes, no text
+    is ever read, and segments are promoted as clean having been scanned by
+    nothing.
+    """
     try:
         import pytesseract  # type: ignore
         from PIL import Image  # noqa: F401
@@ -257,7 +322,22 @@ def default_ocr():
         log.warning("pytesseract not installed; OCR redaction sweep unavailable")
         return None
 
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception as exc:
+        log.warning(
+            "pytesseract is installed but the tesseract binary is not usable (%s). "
+            "Install it (macOS: brew install tesseract, Debian/Ubuntu: apt install "
+            "tesseract-ocr); until then segments cannot clear the redaction sweep.",
+            exc,
+        )
+        return None
+
     def _ocr(image):
+        import numpy as np
+
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image.astype("uint8"))
         data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
         out = []
         for i, text in enumerate(data["text"]):
@@ -364,6 +444,9 @@ def promote_segments(
     pool_root: str | Path,
     require_ocr: bool = True,
     now: float | None = None,
+    encryptor: SegmentEncryptor | None = None,
+    max_ocr_frames: int = 200,
+    change_threshold: int = 6,
 ) -> tuple[list[SegmentMeta], list[SegmentMeta]]:
     """Run the redaction sweep and promote segments that clear it.
 
@@ -377,27 +460,50 @@ def promote_segments(
     promoted: list[SegmentMeta] = []
     quarantined: list[SegmentMeta] = []
 
+    def quarantine(seg: SegmentMeta, reasons: list[str]) -> None:
+        seg.redaction_status = "quarantined"
+        seg.redaction_findings = reasons
+        quarantined.append(seg)
+
     for seg in segments:
         if not seg.records_path:
-            seg.redaction_status = "quarantined"
-            seg.redaction_findings = ["missing_records"]
-            quarantined.append(seg)
+            quarantine(seg, ["missing_records"])
             continue
 
-        records = raw_root / seg.records_path
-        findings = scanner.scan_records(records) if records.exists() else []
-
         if require_ocr and not scanner.has_ocr:
-            seg.redaction_status = "quarantined"
-            seg.redaction_findings = ["ocr_unavailable"] + [f.redacted() for f in findings]
-            quarantined.append(seg)
+            quarantine(seg, ["ocr_unavailable"])
+            continue
+
+        try:
+            # Segments are encrypted at rest by default, which deletes the
+            # plaintext. Reading the ciphertext path directly used to find
+            # nothing, scan nothing, and promote the segment as clean -- so a
+            # missing or unreadable file is now a quarantine, never a pass.
+            with _readable(raw_root / seg.records_path, encryptor) as records:
+                if records is None:
+                    quarantine(seg, ["records_unreadable"])
+                    continue
+                findings = scanner.scan_records(records)
+
+            if scanner.has_ocr and seg.video_path:
+                with _readable(raw_root / seg.video_path, encryptor) as video:
+                    if video is None:
+                        quarantine(seg, ["video_unreadable"])
+                        continue
+                    findings += scanner.scan_video(
+                        video, max_frames=max_ocr_frames, change_threshold=change_threshold
+                    )
+        except PrivacyError:
+            raise
+        except Exception as exc:
+            # Never let a failed scan read as a clean one.
+            log.warning("redaction sweep failed for %s: %s", seg.segment_id, exc)
+            quarantine(seg, [f"scan_failed:{type(exc).__name__}"])
             continue
 
         if findings:
             # Typed-text findings have no bbox, so blurring cannot fix them.
-            seg.redaction_status = "quarantined"
-            seg.redaction_findings = sorted({f.redacted() for f in findings})
-            quarantined.append(seg)
+            quarantine(seg, sorted({f.redacted() for f in findings}))
             continue
 
         seg.redaction_status = "clean"
@@ -407,6 +513,35 @@ def promote_segments(
         promoted.append(seg)
 
     return promoted, quarantined
+
+
+@contextmanager
+def _readable(path: Path, encryptor: SegmentEncryptor | None):
+    """Yield a readable plaintext path for ``path``, or ``None``.
+
+    Handles the encrypted-at-rest case by decrypting to a temporary file that
+    is removed on exit, so the sweep never leaves a decrypted copy of a
+    capture segment lying around after it finishes.
+    """
+    if path.exists():
+        yield path
+        return
+
+    ciphertext = path.with_suffix(path.suffix + ".enc")
+    if not ciphertext.exists():
+        yield None
+        return
+    if encryptor is None:
+        raise PrivacyError(
+            f"{ciphertext.name} is encrypted but no key was supplied, so the redaction "
+            f"sweep cannot read it. Set {SegmentEncryptor.ENV_KEY} and try again -- "
+            "promoting an unscanned segment is not an option."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="gui-agent-sweep-") as tmp:
+        destination = Path(tmp) / path.name
+        encryptor.decrypt_file(ciphertext, destination)
+        yield destination
 
 
 def prune_expired(

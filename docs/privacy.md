@@ -56,14 +56,33 @@ typed and refuse to reconstruct it. A hole in the trajectory beats a guess.
 ### 3. Redaction sweep — before promotion, never in the hot path
 
 A segment goes `pending -> clean | quarantined`, and only `clean` or `redacted`
-segments are ever promoted into the training pool. The sweep is OCR plus regex
-(card numbers with a Luhn check, SSNs, phone numbers, emails, IBANs, API keys),
-and it runs as a batch job — OCR at 15Hz would eat the entire frame budget.
+segments are ever promoted into the training pool. The sweep reads both the
+recorded keystrokes and the recorded *frames* — OCR plus regex (card numbers
+with a Luhn check, SSNs, phone numbers, emails, IBANs, API keys) — and runs as
+a batch job, because OCR at 15Hz would eat the entire frame budget.
+
+Frames are deduplicated by perceptual hash before OCR rather than sampled
+every Nth: at 15Hz consecutive frames are near-identical, so deduplication
+cuts a 300-frame segment to a few dozen distinct screens while still examining
+every screen that actually appeared. Blind sampling would skip whole screens
+that happened to fall between samples. It is still a filter and not a proof —
+`ocr_max_frames` caps the work, and OCR misses text it cannot read.
+
+**The sweep refuses to pass anything it could not read.** Segments are
+encrypted at rest by default, so it decrypts them to a temporary file, scans,
+and discards the plaintext; a missing key, an unreadable file, or a crashed
+scan all quarantine the segment. It never treats "scanned nothing" as
+"found nothing".
 
 Findings quarantine the segment rather than being blurred out, because a
 finding in *typed text* has no screen region to blur. With no OCR backend
 installed, every segment is quarantined rather than promoted: it is better to
 collect nothing than to promote unscanned frames.
+
+Note that `pip install pytesseract` installs the Python wrapper, **not**
+tesseract itself. Install the binary too (`brew install tesseract` on macOS,
+`apt install tesseract-ocr` on Debian/Ubuntu) — until you do, `promote` will
+tell you OCR is unavailable and quarantine everything.
 
 Dataset builders default to `require_promoted=True`. Overriding that is a
 one-flag mistake, which is why it defaults the safe way.

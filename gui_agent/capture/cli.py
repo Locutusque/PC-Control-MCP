@@ -182,35 +182,76 @@ def cmd_record(args) -> int:
     return 0
 
 
+def _session_dirs(config: CaptureConfig, session: str | None) -> list[Path]:
+    """The session directories to operate on.
+
+    The daemon writes each session's manifest to ``<root>/<session_id>/``, so
+    the root itself never holds one -- reading it directly finds nothing and
+    silently reports there is no work to do.
+    """
+    root = Path(config.root)
+    if session:
+        return [root / session]
+    if not root.exists():
+        return []
+    return sorted(p for p in root.glob("*") if p.is_dir())
+
+
 def cmd_promote(args) -> int:
     """Run the redaction sweep and promote clean segments into the pool."""
     config = _load_config(args.config)
-    root = Path(config.root) / args.session if args.session else Path(config.root)
-    segments = [s for s in _load_segments(root) if s.redaction_status == "pending"]
-    if not segments:
+    session_dirs = _session_dirs(config, args.session)
+
+    scanner = RedactionScanner(
+        config.privacy, ocr=default_ocr() if config.privacy.ocr_redaction else None
+    )
+    if config.privacy.ocr_redaction and not scanner.has_ocr:
+        print(
+            "warning: OCR isn't available, so nothing can clear the sweep. Install the\n"
+            "         tesseract binary (macOS: brew install tesseract), or set\n"
+            "         privacy.ocr_redaction=false to scan typed text only.\n"
+        )
+
+    encryptor = None
+    if config.privacy.encrypt_at_rest:
+        try:
+            encryptor = SegmentEncryptor()
+        except PrivacyError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    total_promoted = total_quarantined = pending = 0
+    for session_dir in session_dirs:
+        segments = [s for s in _load_segments(session_dir) if s.redaction_status == "pending"]
+        if not segments:
+            continue
+        pending += len(segments)
+
+        promoted, quarantined = promote_segments(
+            segments, scanner, session_dir, config.pool_root,
+            require_ocr=config.privacy.ocr_redaction, encryptor=encryptor,
+        )
+        by_id = {s.segment_id: s for s in promoted + quarantined}
+        updated = [by_id.get(s.segment_id, s) for s in _load_segments(session_dir)]
+        write_jsonl(session_dir / "segments.jsonl", updated)
+
+        total_promoted += len(promoted)
+        total_quarantined += len(quarantined)
+        for seg in quarantined:
+            print(f"  {session_dir.name}/{seg.segment_id}: {', '.join(seg.redaction_findings)}")
+
+    if not pending:
         print("nothing to promote")
         return 0
-
-    scanner = RedactionScanner(config.privacy, ocr=default_ocr() if config.privacy.ocr_redaction else None)
-    promoted, quarantined = promote_segments(
-        segments, scanner, root, config.pool_root, require_ocr=config.privacy.ocr_redaction
-    )
-    by_id = {s.segment_id: s for s in promoted + quarantined}
-    updated = [by_id.get(s.segment_id, s) for s in _load_segments(root)]
-    write_jsonl(root / "segments.jsonl", updated)
-
-    print(f"promoted {len(promoted)}, quarantined {len(quarantined)}")
-    for seg in quarantined:
-        print(f"  {seg.segment_id}: {', '.join(seg.redaction_findings)}")
+    print(f"promoted {total_promoted}, quarantined {total_quarantined}")
     return 0
 
 
 def cmd_prune(args) -> int:
     """Delete raw segments past the retention window (plan 4.1.3)."""
     config = _load_config(args.config)
-    root = Path(config.root)
     removed: list[str] = []
-    for session_dir in sorted(p for p in root.glob("*") if p.is_dir()):
+    for session_dir in _session_dirs(config, None):
         removed += prune_expired(
             _load_segments(session_dir), session_dir,
             config.privacy.raw_retention_days, dry_run=args.dry_run,

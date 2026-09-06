@@ -241,3 +241,227 @@ class TestEncryptionFailsClosed:
         monkeypatch.delenv(SegmentEncryptor.ENV_KEY, raising=False)
         with pytest.raises(PrivacyError, match=SegmentEncryptor.ENV_KEY):
             SegmentEncryptor()
+
+
+class TestFrameSweep:
+    """The sweep must actually read the video (plan 4.1.3).
+
+    Before this existed, `promote_segments` checked that an OCR backend was
+    *available* and then never used it: only typed text was ever scanned, so a
+    card number rendered in a web page went into the training pool untouched.
+    """
+
+    @staticmethod
+    def _frames(n_distinct: int, repeats: int = 5):
+        """`repeats` identical copies of each of `n_distinct` screens.
+
+        Noise rather than flat fills: a difference hash compares adjacent
+        pixels, so uniform images collapse to the same hash and would make
+        this test pass or fail for reasons unrelated to the deduplication
+        being tested.
+        """
+        import numpy as np
+
+        out = []
+        for i in range(n_distinct):
+            frame = np.random.RandomState(i).randint(0, 255, (32, 32, 3), dtype=np.uint8)
+            out.extend([frame] * repeats)
+        return out
+
+    def _patched_scanner(self, monkeypatch, frames, ocr_text="clean"):
+        seen = []
+
+        def fake_ocr(image):
+            seen.append(image)
+            return [(ocr_text, (0, 0, 10, 10))]
+
+        monkeypatch.setattr(
+            "gui_agent.capture.screen.probe_video_size", lambda path: (32, 32)
+        )
+        monkeypatch.setattr(
+            "gui_agent.capture.screen.read_segment_frames", lambda p, w, h: frames
+        )
+        return RedactionScanner(PrivacyConfig(), ocr=fake_ocr), seen
+
+    def test_near_identical_frames_are_only_ocred_once(self, monkeypatch, tmp_path):
+        # At 15Hz consecutive frames are near-identical; OCRing all 300 would
+        # take minutes and tell you nothing new.
+        scanner, seen = self._patched_scanner(monkeypatch, self._frames(4, repeats=10))
+        scanner.scan_video(tmp_path / "seg.mkv")
+        assert len(seen) == 4
+
+    def test_findings_on_screen_are_reported(self, monkeypatch, tmp_path):
+        scanner, _ = self._patched_scanner(
+            monkeypatch, self._frames(2), ocr_text="card 4111 1111 1111 1111"
+        )
+        findings = scanner.scan_video(tmp_path / "seg.mkv")
+        assert findings and all(f.kind == "credit_card" for f in findings)
+        assert all(f.bbox is not None for f in findings)
+
+    def test_max_frames_caps_the_work(self, monkeypatch, tmp_path):
+        scanner, seen = self._patched_scanner(monkeypatch, self._frames(20))
+        scanner.scan_video(tmp_path / "seg.mkv", max_frames=3)
+        assert len(seen) == 3
+
+    def test_no_ocr_backend_scans_nothing(self, tmp_path):
+        assert RedactionScanner(PrivacyConfig(), ocr=None).scan_video(tmp_path / "s.mkv") == []
+
+    def test_unknown_video_size_is_skipped_not_guessed(self, monkeypatch, tmp_path):
+        # Decoding at a guessed size distorts the image and wrecks OCR.
+        monkeypatch.setattr("gui_agent.capture.screen.probe_video_size", lambda path: None)
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+        assert scanner.scan_video(tmp_path / "seg.mkv") == []
+
+
+class TestPromotionReadsWhatItScans:
+    """Encrypted-at-rest is the default, and the sweep must handle it.
+
+    Reading the plaintext path of an encrypted segment used to find nothing,
+    scan nothing, and promote the segment as clean.
+    """
+
+    def _encrypted_segment(self, tmp_path, name, text, encryptor):
+        write_jsonl(
+            tmp_path / "records" / f"{name}.jsonl",
+            [FrameRecord(0.0, "s", name, 0,
+                         event=InputEvent(EventType.TEXT, text=text).to_dict())],
+        )
+        encryptor.encrypt_file(tmp_path / "records" / f"{name}.jsonl")
+        return SegmentMeta(name, "s", 0.0, 1.0, 10, records_path=f"records/{name}.jsonl")
+
+    @pytest.fixture
+    def encryptor(self, monkeypatch):
+        from gui_agent.capture.privacy import SegmentEncryptor
+
+        monkeypatch.setenv(SegmentEncryptor.ENV_KEY, SegmentEncryptor.generate_key())
+        return SegmentEncryptor()
+
+    def test_encrypted_clean_segment_is_decrypted_and_promoted(self, tmp_path, encryptor):
+        segment = self._encrypted_segment(tmp_path, "seg", "hello world", encryptor)
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+        promoted, quarantined = promote_segments(
+            [segment], scanner, tmp_path, tmp_path / "pool", encryptor=encryptor
+        )
+        assert [s.segment_id for s in promoted] == ["seg"] and not quarantined
+
+    def test_secret_inside_an_encrypted_segment_is_found(self, tmp_path, encryptor):
+        segment = self._encrypted_segment(tmp_path, "seg", "ssn 123-45-6789", encryptor)
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+        promoted, quarantined = promote_segments(
+            [segment], scanner, tmp_path, tmp_path / "pool", encryptor=encryptor
+        )
+        assert not promoted
+        assert "ssn" in quarantined[0].redaction_findings[0]
+
+    def test_no_key_refuses_rather_than_promoting_unscanned(self, tmp_path, encryptor):
+        from gui_agent.capture.privacy import PrivacyError
+
+        segment = self._encrypted_segment(tmp_path, "seg", "hello", encryptor)
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+        with pytest.raises(PrivacyError, match="cannot read"):
+            promote_segments([segment], scanner, tmp_path, tmp_path / "pool", encryptor=None)
+
+    def test_missing_records_are_quarantined_not_promoted(self, tmp_path):
+        segment = SegmentMeta("seg", "s", 0.0, 1.0, 10, records_path="records/gone.jsonl")
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+        promoted, quarantined = promote_segments(
+            [segment], scanner, tmp_path, tmp_path / "pool"
+        )
+        assert not promoted
+        assert quarantined[0].redaction_findings == ["records_unreadable"]
+
+    def test_a_failed_scan_never_reads_as_a_clean_one(self, tmp_path):
+        write_jsonl(tmp_path / "records" / "seg.jsonl",
+                    [FrameRecord(0.0, "s", "seg", 0,
+                                 event=InputEvent(EventType.TEXT, text="hi").to_dict())])
+        segment = SegmentMeta("seg", "s", 0.0, 1.0, 10, records_path="records/seg.jsonl")
+
+        def exploding_ocr(image):
+            raise RuntimeError("tesseract died")
+
+        scanner = RedactionScanner(PrivacyConfig(), ocr=exploding_ocr)
+        scanner.scan_video = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("decode failed"))
+        segment.video_path = "video/seg.mkv"
+        (tmp_path / "video").mkdir(exist_ok=True)
+        (tmp_path / "video" / "seg.mkv").write_bytes(b"not a video")
+
+        promoted, quarantined = promote_segments(
+            [segment], scanner, tmp_path, tmp_path / "pool"
+        )
+        assert not promoted
+        assert quarantined[0].redaction_findings[0].startswith("scan_failed")
+
+    def test_decrypted_plaintext_is_not_left_behind(self, tmp_path, encryptor):
+        segment = self._encrypted_segment(tmp_path, "seg", "hello world", encryptor)
+        scanner = RedactionScanner(PrivacyConfig(), ocr=lambda i: [])
+        promote_segments([segment], scanner, tmp_path, tmp_path / "pool", encryptor=encryptor)
+        # The sweep must not leave a decrypted capture segment on disk.
+        assert not (tmp_path / "records" / "seg.jsonl").exists()
+
+
+class TestOcrAvailability:
+    def test_missing_tesseract_binary_reports_unavailable(self, monkeypatch):
+        """pip installs the wrapper, not the binary.
+
+        Reporting OCR as available when every call would raise is the worst
+        outcome: the gate passes, nothing is read, everything looks clean.
+        """
+        import sys
+        import types
+
+        fake = types.ModuleType("pytesseract")
+        fake.get_tesseract_version = lambda: (_ for _ in ()).throw(
+            RuntimeError("tesseract is not installed")
+        )
+        fake.Output = types.SimpleNamespace(DICT="dict")
+        monkeypatch.setitem(sys.modules, "pytesseract", fake)
+
+        from gui_agent.capture.privacy import default_ocr
+
+        assert default_ocr() is None
+
+
+class TestSessionDiscovery:
+    """`promote` reported "nothing to promote" while `status` showed a pending
+    segment, because it read `<root>/segments.jsonl` while the daemon writes
+    `<root>/<session_id>/segments.jsonl`."""
+
+    def test_sessions_are_found_under_the_root(self, tmp_path):
+        from gui_agent.capture.cli import _session_dirs
+        from gui_agent.config import CaptureConfig
+
+        for name in ("sess_1", "sess_2"):
+            (tmp_path / name).mkdir()
+        (tmp_path / "loose_file.txt").write_text("not a session")
+
+        found = _session_dirs(CaptureConfig(root=str(tmp_path)), None)
+        assert [p.name for p in found] == ["sess_1", "sess_2"]
+
+    def test_explicit_session_is_used_directly(self, tmp_path):
+        from gui_agent.capture.cli import _session_dirs
+        from gui_agent.config import CaptureConfig
+
+        found = _session_dirs(CaptureConfig(root=str(tmp_path)), "sess_9")
+        assert found == [tmp_path / "sess_9"]
+
+    def test_missing_root_is_empty_not_an_error(self, tmp_path):
+        from gui_agent.capture.cli import _session_dirs
+        from gui_agent.config import CaptureConfig
+
+        assert _session_dirs(CaptureConfig(root=str(tmp_path / "nope")), None) == []
+
+    def test_promote_and_status_agree_on_where_segments_live(self, tmp_path):
+        """The two commands must not disagree about what exists."""
+        from gui_agent.capture.cli import _load_segments, _session_dirs
+        from gui_agent.config import CaptureConfig
+
+        session = tmp_path / "sess_1788676375"
+        session.mkdir()
+        write_jsonl(session / "segments.jsonl",
+                    [SegmentMeta("seg_a", "sess_1788676375", 0.0, 20.0, 300,
+                                 records_path="records/seg_a.jsonl")])
+
+        config = CaptureConfig(root=str(tmp_path))
+        pending = [s for d in _session_dirs(config, None)
+                   for s in _load_segments(d) if s.redaction_status == "pending"]
+        assert len(pending) == 1
