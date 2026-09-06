@@ -32,7 +32,8 @@ capture-macos = [
 ]
 capture-windows = ["psutil>=5.9", "comtypes>=1.2"]
 # OCR redaction sweep.
-redaction = ["pytesseract>=0.3.10", "pillow>=10.0"]
+# numpy is required too: the sweep decodes video frames and hands arrays to OCR.
+redaction = ["pytesseract>=0.3.10", "pillow>=10.0", "numpy>=1.24"]
 
 model = [
   "torch>=2.2",
